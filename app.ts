@@ -217,7 +217,9 @@ function commitJson(repo: RepoRec, oid: string): Record<string, unknown> | null 
   return {
     sha: oid,
     commit: {
-      message,
+      // The API answers the message as authored; a git object's conventional trailing
+      // newline is not part of it.
+      message: message.replace(/\n+$/, ''),
       author: parseAuthorLine(authorLine),
       committer: parseAuthorLine(committerLine),
       tree: { sha: info.tree },

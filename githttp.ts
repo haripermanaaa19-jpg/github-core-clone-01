@@ -287,11 +287,14 @@ function planFetch(repo: RepoRec, request: FetchRequest): FetchPlan {
   for (let head = 0; head < queue.length; head += 1) {
     const oid = queue[head];
     const depth = layer.get(oid) as number;
-    if (excludedCommits.has(oid)) continue;
     if (request.deepen !== null && depth > request.deepen) continue;
     const object = getObject(repo, oid);
     if (object === null || object.type !== 'commit') continue;
-    included.add(oid);
+    if (!excludedCommits.has(oid)) included.add(oid);
+    // A plain fetch stops at the client's haves; a deepen fetch walks through them, because
+    // the layers below a shallow have are exactly what is being deepened into.
+    if (excludedCommits.has(oid) && request.deepen === null) continue;
+    if (request.deepen !== null && depth >= request.deepen) continue;
     for (const parent of parseCommitParents(object.data)) {
       if (!layer.has(parent)) {
         layer.set(parent, depth + 1);
@@ -325,11 +328,17 @@ function planFetch(repo: RepoRec, request: FetchRequest): FetchPlan {
     if (object === null || object.type !== 'commit') continue;
     const parents = parseCommitParents(object.data);
     const covered = parents.every((parent) => included.has(parent) || excludedCommits.has(parent));
-    if (parents.length > 0 && !covered) {
-      if (!clientShallow.has(oid)) newShallow.push(oid);
-    } else if (clientShallow.has(oid)) {
-      unshallow.push(oid);
-    }
+    if (parents.length > 0 && !covered && !clientShallow.has(oid)) newShallow.push(oid);
+  }
+  // A commit the client held as shallow stops being shallow once its parents are all present
+  // client-side — sent now, or already held (which is why it was in the exclusion closure).
+  for (const oid of clientShallow) {
+    const object = getObject(repo, oid);
+    if (object === null || object.type !== 'commit') continue;
+    const parents = parseCommitParents(object.data);
+    if (parents.length === 0) continue;
+    const covered = parents.every((parent) => included.has(parent) || excludedCommits.has(parent));
+    if (covered) unshallow.push(oid);
   }
   newShallow.sort();
   unshallow.sort();
