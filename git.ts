@@ -192,10 +192,22 @@ export function applyDelta(base: Buffer, delta: Buffer): Buffer {
 
 /**
  * Inflate the zlib stream starting at `start`, returning the payload and the offset just past the
- * stream. Node's inflateSync ignores trailing bytes, so the consumed length is found by searching
- * for the shortest prefix that inflates to exactly `expectedSize` bytes.
+ * stream. The zlib `info` option reports exactly how many input bytes the stream consumed; where
+ * that is unavailable, fall back to searching for the shortest prefix that inflates to exactly
+ * `expectedSize` bytes (inflateSync ignores trailing bytes, and a shorter prefix cannot inflate).
  */
 function inflateEntry(buf: Buffer, start: number, expectedSize: number): { data: Buffer; next: number } {
+  try {
+    const result = inflateSync(buf.subarray(start), { info: true }) as unknown as {
+      buffer: Buffer;
+      engine: { bytesWritten: number };
+    };
+    if (Buffer.isBuffer(result.buffer) && result.buffer.length === expectedSize && typeof result.engine?.bytesWritten === 'number') {
+      return { data: result.buffer, next: start + result.engine.bytesWritten };
+    }
+  } catch {
+    // fall through to the prefix search
+  }
   const remaining = buf.length - start;
   const tryLength = (length: number): Buffer | null => {
     try {
